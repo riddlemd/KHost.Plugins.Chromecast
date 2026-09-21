@@ -1,0 +1,61 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <!-- Sharpcaster and its protobuf stack are plugin-private: the host dropped them with this
+         code, so AssemblyDependencyResolver has to find them beside the plugin or every connect
+         throws FileNotFoundException. The contracts are trimmed back out by their own targets. -->
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <_KHostOutputDir>$(MSBuildProjectDirectory)\..\..\..\KHost\src\KHost.UserInterface\bin\Debug\net10.0</_KHostOutputDir>
+    <_PluginDeployDir>$(_KHostOutputDir)\plugins\khost.chromecast</_PluginDeployDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The published contracts, not a sibling checkout: an outside author has no checkout of the
+         host beside them, and this repo would otherwise break whenever that one changed branch.
+         Both are MIT, so nothing PolyForm reaches what this plugin redistributes. The packages'
+         own targets keep them out of this project's output, so the host's copies stay the loaded
+         ones without ExcludeAssets here - which would also strip them from the test project. -->
+    <PackageReference Include="KHost.Abstractions" Version="0.18.0" />
+    <PackageReference Include="KHost.Common" Version="0.18.0" />
+
+    <!-- The host has these loaded already, so a shipped copy is never the one used. -->
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.7" />
+    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.7" />
+
+    <!-- The whole reason this is a plugin: mDNS browsing and the CASTV2 protobuf stack are a
+         third-party dependency the host should not carry to play a local file. -->
+    <PackageReference Include="Sharpcaster" Version="3.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="KHost.Plugins.Chromecast.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="manifest.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!-- Dev convenience: drop the built plugin into a sibling KHost checkout's runtime plugins
+       folder when one exists. Harmless no-op anywhere else. -->
+  <Target Name="DeployToSiblingKHost" AfterTargets="Build" Condition="Exists('$(_KHostOutputDir)')">
+    <ItemGroup>
+      <!-- Globbed inside the target so it sees what is on disk now, not at evaluation. -->
+      <_StalePluginFiles Include="$(_PluginDeployDir)\**\*" />
+      <_PluginFiles Include="$(TargetDir)**\*" />
+    </ItemGroup>
+
+    <!-- Emptied first: a copy only overwrites what it brings, so a dropped reference would
+         otherwise leave its old assembly beside the new ones. -->
+    <Delete Files="@(_StalePluginFiles)" ContinueOnError="true" />
+
+    <Copy SourceFiles="@(_PluginFiles)"
+          DestinationFiles="@(_PluginFiles->'$(_PluginDeployDir)\%(RecursiveDir)%(Filename)%(Extension)')" />
+  </Target>
+
+</Project>

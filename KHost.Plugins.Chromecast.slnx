@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/KHost.Plugins.Chromecast/KHost.Plugins.Chromecast.csproj" />
+  </Folder>
+
+  <Folder Name="/tests/">
+    <Project Path="tests/KHost.Plugins.Chromecast.Tests/KHost.Plugins.Chromecast.Tests.csproj" />
+  </Folder>
+</Solution>

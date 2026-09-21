@@ -1,0 +1,15 @@
+{
+  "$schema": "https://raw.githubusercontent.com/riddlemd/KHost/main/src/KHost.Abstractions/Models/Plugins/manifest.schema.json",
+  "id": "c7a41e92-3d58-4b06-8f13-6ad9c25e7b40",
+  "name": "Chromecast",
+  "version": "1.0.0",
+  "author": "KHost",
+  "description": "Sends the song to a Chromecast receiver on the local network.",
+  "icon": "cast",
+  "entryAssembly": "KHost.Plugins.Chromecast.dll",
+  "apiVersion": 3,
+  "settings": [
+    { "key": "discoverySeconds", "type": "int", "section": "Discovery", "label": "How long to sweep the network for receivers (seconds)", "default": 5 },
+    { "key": "connectTimeoutSeconds", "type": "int", "section": "Discovery", "label": "How long a receiver has to answer before giving up (seconds)", "default": 10 }
+  ]
+}
