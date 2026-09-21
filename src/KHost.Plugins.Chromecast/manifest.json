@@ -9,7 +9,27 @@
   "entryAssembly": "KHost.Plugins.Chromecast.dll",
   "apiVersion": 3,
   "settings": [
-    { "key": "discoverySeconds", "type": "int", "section": "Discovery", "label": "How long to sweep the network for receivers (seconds)", "default": 5 },
-    { "key": "connectTimeoutSeconds", "type": "int", "section": "Discovery", "label": "How long a receiver has to answer before giving up (seconds)", "default": 10 }
+    {
+      "key": "discoverySeconds",
+      "type": "int",
+      "section": "Discovery",
+      "label": "How long to sweep the network for receivers (seconds)",
+      "default": 5
+    },
+    {
+      "key": "connectTimeoutSeconds",
+      "type": "int",
+      "section": "Discovery",
+      "label": "How long a receiver has to answer before giving up (seconds)",
+      "default": 10
+    }
+  ],
+  "buttons": [
+    {
+      "key": "devices",
+      "label": "Devices",
+      "icon": "display",
+      "style": "secondary"
+    }
   ]
 }

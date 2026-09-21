@@ -13,6 +13,14 @@ app is, and mDNS browsing plus a CASTV2 protobuf transport (Sharpcaster, Zerocon
 System.Reactive) is a dependency chain the host should not carry just to play a local file. Moving
 it out took all of that with it.
 
+## The device list
+
+Discovery, connecting and disconnecting are reached from a **Devices** button on the Plugins page,
+not from the console's Screens dialog. A plugin cannot ship markup, so `ChromecastDeviceTable`
+describes a table — columns, a row per receiver, and what each button does — and the host draws it
+from a `ShowPluginTableRequest`. The button also reports what the room is watching without being
+opened.
+
 ## What it implements
 
 `IDisplayProvider` — discovery, one connection at a time, and the transport calls playback drives it

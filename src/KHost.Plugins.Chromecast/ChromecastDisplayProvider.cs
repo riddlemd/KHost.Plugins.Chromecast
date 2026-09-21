@@ -3,6 +3,7 @@ using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using KHost.Abstractions.Services;
 using KHost.Abstractions.Models.Plugins;
+using KHost.Abstractions.Interactions;
 
 // Aliased rather than importing the namespace: Sharpcaster has its own MediaStatus.
 using MediaStreamSession = KHost.Abstractions.Models.MediaStreamSession;
@@ -20,7 +21,7 @@ namespace KHost.Plugins.Chromecast;
 /// <remarks>Bound by the host as an <see cref="IDisplayProvider"/>: the receiver is never a screen
 /// and holds no role in the sync set, so playback drives it directly rather than broadcasting.
 /// </remarks>
-public sealed class ChromecastDisplayProvider : IDisplayProvider, IDisposable
+public sealed class ChromecastDisplayProvider : IDisplayProvider, IPluginButtonHandler, IDisposable
 {
     internal sealed class ServiceOptions
     {
@@ -43,6 +44,7 @@ public sealed class ChromecastDisplayProvider : IDisplayProvider, IDisposable
     private readonly SemaphoreSlim _lock = new(1, 1);
     private readonly Dictionary<string, ChromecastReceiver> _discovered = [];
     private readonly IMessageBroker _broker;
+    private readonly IInteractionDispatcher? _dispatcher;
 
     private ChromecastLocator? _locator;
     private ChromecastClient? _client;
@@ -65,19 +67,40 @@ public sealed class ChromecastDisplayProvider : IDisplayProvider, IDisposable
     public string Name => "Chromecast";
 
     public ChromecastDisplayProvider(
-        ILogger<ChromecastDisplayProvider> logger, IPluginContext context, IMessageBroker broker)
-        : this(logger, OptionsFrom(context.BindSettings<ChromecastSettings>()), broker)
+        ILogger<ChromecastDisplayProvider> logger,
+        IPluginContext context,
+        IMessageBroker broker,
+        IInteractionDispatcher dispatcher)
+        : this(logger, OptionsFrom(context.BindSettings<ChromecastSettings>()), broker, dispatcher)
     {
     }
 
     /// <summary>The seam the tests build against: they supply timings without a plugin context.</summary>
     internal ChromecastDisplayProvider(
-        ILogger<ChromecastDisplayProvider> logger, ServiceOptions options, IMessageBroker broker)
+        ILogger<ChromecastDisplayProvider> logger,
+        ServiceOptions options,
+        IMessageBroker broker,
+        IInteractionDispatcher? dispatcher = null)
     {
         _logger = logger;
         _options = options;
         _broker = broker;
+        _dispatcher = dispatcher;
     }
+
+    /// <summary>The key the manifest declares; an unknown one is a no-op by contract.</summary>
+    internal const string DevicesButtonKey = "devices";
+
+    public Task InvokeButtonAsync(string key, CancellationToken cancellationToken = default)
+        => key == DevicesButtonKey && _dispatcher is { } dispatcher
+            ? dispatcher.RequestAsync(ChromecastDeviceTable.RequestFor(this), cancellationToken)
+            : Task.CompletedTask;
+
+    /// <summary>Says what the room is watching without the host opening anything.</summary>
+    public PluginButtonState DescribeButton(string key)
+        => key == DevicesButtonKey
+            ? new PluginButtonState { Label = ChromecastDeviceTable.ButtonLabelFor(this) }
+            : PluginButtonState.Default;
 
     private static ServiceOptions OptionsFrom(ChromecastSettings settings) => new()
     {
@@ -531,8 +554,13 @@ public sealed class ChromecastDisplayProvider : IDisplayProvider, IDisposable
 
     private void RaiseStateChanged()
     {
-        if (_broker is { } broker)
-            _ = broker.PublishAsync(new DisplaysChanged());
+        if (_broker is not { } broker) return;
+
+        _ = broker.PublishAsync(new DisplaysChanged());
+
+        // The same change, said to an open device table: a sweep that finds a receiver has to
+        // reach the dialog, which knows nothing about this transport's own message.
+        _ = broker.PublishAsync(new PluginTableChanged());
     }
 
     public void Dispose()

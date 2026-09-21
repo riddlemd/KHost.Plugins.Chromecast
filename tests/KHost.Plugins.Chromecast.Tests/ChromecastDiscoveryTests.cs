@@ -44,6 +44,15 @@ public class ChromecastDiscoveryTests : IDisposable
         await _broker.Received(1).PublishAsync(Arg.Any<DisplaysChanged>());
     }
 
+    [Fact]
+    public async Task StopDiscovery_AlsoAnnouncesPluginTableChanged_SoAnOpenDeviceTableRereads()
+    {
+        await _display.StopDiscoveryAsync();
+
+        // The dialog is generic and never hears DisplaysChanged; without this it sits stale.
+        await _broker.Received(1).PublishAsync(Arg.Any<PluginTableChanged>());
+    }
+
     public void Dispose()
     {
         _display.Dispose();
