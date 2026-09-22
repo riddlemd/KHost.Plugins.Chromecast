@@ -21,8 +21,8 @@
          Both are MIT, so nothing PolyForm reaches what this plugin redistributes. The packages'
          own targets keep them out of this project's output, so the host's copies stay the loaded
          ones without ExcludeAssets here - which would also strip them from the test project. -->
-    <PackageReference Include="KHost.Abstractions" Version="0.23.0" />
-    <PackageReference Include="KHost.Common" Version="0.23.0" />
+    <PackageReference Include="KHost.Abstractions" Version="0.24.0" />
+    <PackageReference Include="KHost.Common" Version="0.24.0" />
 
     <!-- The host has these loaded already, so a shipped copy is never the one used. -->
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.7" />
