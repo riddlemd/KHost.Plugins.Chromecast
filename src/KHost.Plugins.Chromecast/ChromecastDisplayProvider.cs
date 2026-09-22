@@ -8,6 +8,7 @@ using KHost.Abstractions.Interactions;
 // Aliased rather than importing the namespace: Sharpcaster has its own MediaStatus.
 using MediaStreamSession = KHost.Abstractions.Models.MediaStreamSession;
 using KHost.Abstractions.Messaging;
+using KHost.Common.Discovery;
 using KHost.Abstractions.Messaging.Messages;
 using Microsoft.Extensions.Logging;
 using Sharpcaster;
@@ -42,7 +43,13 @@ public sealed class ChromecastDisplayProvider : IDisplayProvider, IPluginButtonH
     private readonly ServiceOptions _options;
     private readonly ILogger<ChromecastDisplayProvider> _logger;
     private readonly SemaphoreSlim _lock = new(1, 1);
+    /// <summary>The Bonjour registration type; the wire name carries no trailing domain.</summary>
+    private const string BonjourServiceType = "_googlecast._tcp";
+
     private readonly Dictionary<string, ChromecastReceiver> _discovered = [];
+
+    /// <summary>Non-null while the macOS sweep loop is running; the locator's counterpart.</summary>
+    private CancellationTokenSource? _bonjour;
     private readonly IMessageBroker _broker;
     private readonly IInteractionDispatcher? _dispatcher;
 
@@ -131,29 +138,48 @@ public sealed class ChromecastDisplayProvider : IDisplayProvider, IPluginButtonH
                     Model = entry.Value.Model,
                     Address = entry.Value.DeviceUri?.Host,
                     IsConnected = entry.Key == _connectedDeviceId,
+
+                    // A receiver plays the stream and draws nothing over it. The drawable flags
+                    // stay false on purpose: the host then never sends what would not land, and
+                    // the console can say so before a host picks this one.
+                    SupportsAudio = true,
+                    SupportsVideo = true,
+
+                    // No mixer of ours to ride down — StopAsync cuts. Left false so the host
+                    // stops instantly rather than waiting out a fade that never happens.
+                    SupportsFade = false,
                 })];
             }
             finally { _lock.Release(); }
         }
     }
 
-    public bool IsDiscovering => _locator is not null;
+    public bool IsDiscovering => _locator is not null || _bonjour is not null;
 
     public async Task StartDiscoveryAsync(CancellationToken cancellationToken = default)
     {
-        if (_locator is not null) return;
+        if (IsDiscovering) return;
+
+        _logger.LogInformation("Browsing for Cast receivers");
+
+        if (BonjourBrowser.IsSupported)
+        {
+            await StartBonjourDiscoveryAsync();
+            return;
+        }
 
         var locator = new ChromecastLocator();
         locator.ChromecastReceiverFound += OnReceiverFound;
         _locator = locator;
 
-        _logger.LogInformation("Browsing for Cast receivers");
-
         // One sweep now so the page has something immediately, then keep listening.
         try
         {
-            foreach (var receiver in await locator.FindReceiversAsync(_options.DiscoveryTimeout))
+            var found = await locator.FindReceiversAsync(_options.DiscoveryTimeout);
+            foreach (var receiver in found)
                 Remember(receiver);
+
+            ReportSweep(found.Count());
         }
         catch (Exception ex)
         {
@@ -164,8 +190,87 @@ public sealed class ChromecastDisplayProvider : IDisplayProvider, IPluginButtonH
         RaiseStateChanged();
     }
 
+    /// <summary>Says what a sweep actually found, because silence reads the same as every failure.</summary>
+    /// <remarks>A blocked sweep and an empty room looked identical from the log, which is most of
+    /// why a machine that could not multicast at all took so long to tell anyone.</remarks>
+    private void ReportSweep(int count)
+    {
+        if (count > 0) _logger.LogInformation("Cast sweep found {Count} receiver(s)", count);
+        else _logger.LogInformation("Cast sweep found no receivers");
+    }
+
+    // --- macOS: the system daemon, because a managed socket cannot multicast here ---
+
+    /// <summary>Sweeps now, then keeps sweeping, the way continuous discovery does elsewhere.</summary>
+    private async Task StartBonjourDiscoveryAsync()
+    {
+        var cancellation = new CancellationTokenSource();
+        _bonjour = cancellation;
+
+        await BonjourSweepAsync(cancellation.Token);
+
+        _ = Task.Run(async () =>
+        {
+            while (!cancellation.IsCancellationRequested)
+            {
+                try
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(30), cancellation.Token);
+                    await BonjourSweepAsync(cancellation.Token);
+                }
+                catch (OperationCanceledException) { return; }
+                catch (Exception ex) { _logger.LogWarning(ex, "Cast discovery sweep failed"); }
+            }
+        }, CancellationToken.None);
+
+        RaiseStateChanged();
+    }
+
+    private async Task BonjourSweepAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var services = await BonjourBrowser.BrowseAsync(
+                BonjourServiceType, _options.DiscoveryTimeout, cancellationToken);
+
+            var added = 0;
+            foreach (var service in services)
+            {
+                if (service.Address is null) continue;
+                if (Remember(ReceiverFor(service))) added++;
+            }
+
+            ReportSweep(services.Count);
+
+            if (added > 0) RaiseStateChanged();
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Cast discovery sweep failed");
+        }
+    }
+
+    /// <summary>Bonjour answers with a host and port; Sharpcaster wants its own receiver shape.</summary>
+    private static ChromecastReceiver ReceiverFor(BonjourBrowser.Service service) => new()
+    {
+        Name = service.Name,
+        DeviceUri = new Uri($"https://{service.Address}"),
+        Port = service.Port,
+    };
+
     public Task StopDiscoveryAsync(CancellationToken cancellationToken = default)
     {
+        var bonjour = _bonjour;
+        _bonjour = null;
+
+        if (bonjour is not null)
+        {
+            bonjour.Cancel();
+            bonjour.Dispose();
+            _logger.LogInformation("Stopped browsing for Cast receivers");
+        }
+
         var locator = _locator;
         _locator = null;
 
@@ -302,7 +407,8 @@ public sealed class ChromecastDisplayProvider : IDisplayProvider, IPluginButtonH
         => _client is { } c ? GuardAsync(c.MediaChannel.PauseAsync) : Task.CompletedTask;
 
     // No fade: Cast has no volume ramp, and faking one would move the TV's own level.
-    public Task StopAsync(CancellationToken cancellationToken = default)
+    /// <summary>The fade is ignored: a receiver stops where it is, having no mixer to ride down.</summary>
+    public Task StopAsync(TimeSpan? fade = null, CancellationToken cancellationToken = default)
         => _client is { } c ? GuardAsync(c.MediaChannel.StopAsync) : Task.CompletedTask;
 
     public Task SeekAsync(TimeSpan position, CancellationToken cancellationToken = default)

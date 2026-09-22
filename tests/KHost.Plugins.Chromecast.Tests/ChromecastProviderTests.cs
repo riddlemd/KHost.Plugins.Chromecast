@@ -18,15 +18,60 @@ public class ChromecastProviderSeparationTests
         Assert.DoesNotContain(typeof(IScreenProvider), implemented);
     }
 
+    /// <summary>The interface now carries the whole drawable surface, every member of it with a
+    /// default body. A receiver draws none of it, and the way it says so is by implementing none
+    /// of it — an override here would be a screen feature arriving inside the Cast plugin.</summary>
     [Fact]
-    public void CastService_ExposesNoScreenCommandSurface()
+    public void CastService_ImplementsNothingDrawable()
     {
-        var takesCommands = typeof(IDisplayProvider).GetMethods()
+        var drawable = typeof(IDisplayProvider).GetMethods()
             .Where(m => m.GetParameters().Any(p => typeof(IScreenCommand).IsAssignableFrom(p.ParameterType)))
-            .Select(m => m.Name);
+            .ToList();
 
-        // Accepting IScreenCommand is the doorway every future screen feature leaks through.
-        Assert.True(!takesCommands.Any(), $"IDisplayProvider takes screen commands: {string.Join(", ", takesCommands)}");
+        Assert.NotEmpty(drawable);
+
+        var map = typeof(ChromecastDisplayProvider).GetInterfaceMap(typeof(IDisplayProvider));
+
+        var overridden = drawable
+            .Where(method =>
+            {
+                var index = Array.IndexOf(map.InterfaceMethods, method);
+
+                // Declared on the interface itself is the default body; declared on the provider
+                // is an override, which is what this test exists to catch.
+                return index >= 0 && map.TargetMethods[index].DeclaringType == typeof(ChromecastDisplayProvider);
+            })
+            .Select(m => m.Name)
+            .ToList();
+
+        Assert.True(
+            overridden.Count == 0,
+            $"The Cast provider draws things it cannot draw: {string.Join(", ", overridden)}");
+    }
+
+    /// <summary>A receiver plays the song and draws nothing over it, and the host reads these to
+    /// decide what to send. Reporting a drawable capability would have the words silently dropped.</summary>
+    [Fact]
+    public void CastDevices_CarryTheSongButDrawNothing()
+    {
+        var device = new DisplayDevice
+        {
+            Id = "tv-1",
+            Name = "Living Room TV",
+            SupportsAudio = true,
+            SupportsVideo = true,
+        };
+
+        Assert.True(device.SupportsAudio);
+        Assert.True(device.SupportsVideo);
+
+        // The host waits out the fade it asks for, so claiming one here would buy the room
+        // seconds of silence between every song.
+        Assert.False(device.SupportsFade);
+        Assert.False(device.SupportsLyrics);
+        Assert.False(device.SupportsMarquee);
+        Assert.False(device.SupportsQrCodes);
+        Assert.False(device.SupportsImage);
     }
 }
 
