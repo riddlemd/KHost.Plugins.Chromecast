@@ -1,6 +1,7 @@
 using KHost.Plugins.Chromecast;
 using KHost.Abstractions.Messaging;
 using KHost.Abstractions.Messaging.Messages;
+using KHost.Common.Discovery;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Sharpcaster.Models;
@@ -140,6 +141,62 @@ public class ChromecastDiscoveryTests : IDisposable
             LogLevel logLevel, EventId eventId, TState state, Exception? exception,
             Func<TState, Exception?, string> formatter)
             => Levels.Add(logLevel);
+    }
+
+    /// <summary>The bug: both sweeps used to await the whole first pass before announcing anything,
+    /// so an open device table sat on "Not searching for devices." for the entire ~8s first sweep
+    /// instead of "Looking for devices…".</summary>
+    [Fact]
+    public async Task StartZeroconfDiscoveryAsync_AnnouncesAsSoonAsArmed_BeforeTheFirstSweepFinishes()
+    {
+        var gate = new TaskCompletionSource<IEnumerable<ChromecastReceiver>>();
+        using var display = new ChromecastDisplayProvider(
+            NullLogger<ChromecastDisplayProvider>.Instance,
+            new ChromecastDisplayProvider.ServiceOptions(),
+            _broker,
+            zeroconfSweep: (_, _) => gate.Task);
+
+        var starting = display.StartZeroconfDiscoveryAsync();
+
+        // The method suspends on the sweep itself: everything before that first await has already
+        // run by the time control returns here, so no Task.Delay is needed to observe it.
+        Assert.True(display.IsDiscovering);
+        await _broker.Received(1).PublishAsync(Arg.Any<PluginTableChanged>());
+
+        var midFlight = await ChromecastDeviceTable.RequestFor(display).LoadAsync(CancellationToken.None);
+        Assert.Equal("Looking for devices…", midFlight.EmptyMessage);
+
+        gate.SetResult([]);
+        await starting;
+
+        var after = await ChromecastDeviceTable.RequestFor(display).LoadAsync(CancellationToken.None);
+        Assert.Equal("No receivers found.", after.EmptyMessage);
+    }
+
+    /// <summary>The Bonjour half of the same bug, on the path macOS actually takes.</summary>
+    [Fact]
+    public async Task StartBonjourDiscoveryAsync_AnnouncesAsSoonAsArmed_BeforeTheFirstSweepFinishes()
+    {
+        var gate = new TaskCompletionSource<IReadOnlyList<BonjourBrowser.Service>>();
+        using var display = new ChromecastDisplayProvider(
+            NullLogger<ChromecastDisplayProvider>.Instance,
+            new ChromecastDisplayProvider.ServiceOptions(),
+            _broker,
+            bonjourBrowse: (_, _, _) => gate.Task);
+
+        var starting = display.StartBonjourDiscoveryAsync();
+
+        Assert.True(display.IsDiscovering);
+        await _broker.Received(1).PublishAsync(Arg.Any<PluginTableChanged>());
+
+        var midFlight = await ChromecastDeviceTable.RequestFor(display).LoadAsync(CancellationToken.None);
+        Assert.Equal("Looking for devices…", midFlight.EmptyMessage);
+
+        gate.SetResult([]);
+        await starting;
+
+        var after = await ChromecastDeviceTable.RequestFor(display).LoadAsync(CancellationToken.None);
+        Assert.Equal("No receivers found.", after.EmptyMessage);
     }
 
     public void Dispose()

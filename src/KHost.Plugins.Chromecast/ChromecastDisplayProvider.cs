@@ -74,6 +74,8 @@ public sealed class ChromecastDisplayProvider : IDisplayProvider, IPluginButtonH
     private readonly Func<Media, bool, Task> _castMedia;
     private readonly Func<string?> _lanAddress;
     private readonly Func<Task> _stopMedia;
+    private readonly Func<ChromecastLocator, TimeSpan, Task<IEnumerable<ChromecastReceiver>>> _zeroconfSweep;
+    private readonly Func<string, TimeSpan, CancellationToken, Task<IReadOnlyList<BonjourBrowser.Service>>> _bonjourBrowse;
     private readonly SubscriptionSet _subscriptions = new();
     private readonly SemaphoreSlim _pictureLock = new(1, 1);
 
@@ -124,7 +126,9 @@ public sealed class ChromecastDisplayProvider : IDisplayProvider, IPluginButtonH
         IServiceProvider? services = null,
         Func<Media, bool, Task>? castMedia = null,
         Func<string?>? lanAddress = null,
-        Func<Task>? stopMedia = null)
+        Func<Task>? stopMedia = null,
+        Func<ChromecastLocator, TimeSpan, Task<IEnumerable<ChromecastReceiver>>>? zeroconfSweep = null,
+        Func<string, TimeSpan, CancellationToken, Task<IReadOnlyList<BonjourBrowser.Service>>>? bonjourBrowse = null)
     {
         _logger = logger;
         _options = options;
@@ -134,6 +138,8 @@ public sealed class ChromecastDisplayProvider : IDisplayProvider, IPluginButtonH
         _castMedia = castMedia ?? CastOnClientAsync;
         _lanAddress = lanAddress ?? LanAddress;
         _stopMedia = stopMedia ?? StopOnClientAsync;
+        _zeroconfSweep = zeroconfSweep ?? ((locator, timeout) => locator.FindReceiversAsync(timeout));
+        _bonjourBrowse = bonjourBrowse ?? BonjourBrowser.BrowseAsync;
 
         _subscriptions.Add(broker.Subscribe<PlaybackChanged>(_ => Redraw(venueMoved: false)));
 
@@ -225,14 +231,26 @@ public sealed class ChromecastDisplayProvider : IDisplayProvider, IPluginButtonH
             return;
         }
 
+        await StartZeroconfDiscoveryAsync();
+    }
+
+    /// <summary>Windows/Linux: a managed multicast search. Internal, and callable directly, so a
+    /// test can exercise this path on macOS too, where <see cref="BonjourBrowser.IsSupported"/>
+    /// would otherwise steer every call through the other one.</summary>
+    internal async Task StartZeroconfDiscoveryAsync()
+    {
         var locator = new ChromecastLocator();
         locator.ChromecastReceiverFound += OnReceiverFound;
         _locator = locator;
 
+        // Armed before the sweep is awaited: an open device table can read "Looking for devices…"
+        // for however long the first sweep takes, instead of "Not searching" the whole time.
+        RaiseStateChanged();
+
         // One sweep now so the page has something immediately, then keep listening.
         try
         {
-            var found = (await locator.FindReceiversAsync(_options.DiscoveryTimeout)).ToList();
+            var found = (await _zeroconfSweep(locator, _options.DiscoveryTimeout)).ToList();
             foreach (var receiver in found)
                 Remember(receiver);
 
@@ -262,11 +280,16 @@ public sealed class ChromecastDisplayProvider : IDisplayProvider, IPluginButtonH
 
     // --- macOS: the system daemon, because a managed socket cannot multicast here ---
 
-    /// <summary>Sweeps now, then keeps sweeping, the way continuous discovery does elsewhere.</summary>
-    private async Task StartBonjourDiscoveryAsync()
+    /// <summary>Sweeps now, then keeps sweeping, the way continuous discovery does elsewhere.
+    /// Internal, and callable directly, so a test can drive this path without depending on the
+    /// test machine's own <see cref="BonjourBrowser.IsSupported"/>.</summary>
+    internal async Task StartBonjourDiscoveryAsync()
     {
         var cancellation = new CancellationTokenSource();
         _bonjour = cancellation;
+
+        // Armed before the sweep is awaited: see StartZeroconfDiscoveryAsync's remark.
+        RaiseStateChanged();
 
         await BonjourSweepAsync(cancellation.Token);
 
@@ -291,7 +314,7 @@ public sealed class ChromecastDisplayProvider : IDisplayProvider, IPluginButtonH
     {
         try
         {
-            var services = await BonjourBrowser.BrowseAsync(
+            var services = await _bonjourBrowse(
                 BonjourServiceType, _options.DiscoveryTimeout, cancellationToken);
 
             ApplySweepResult(services.Count, services.Where(s => s.Address is not null).Select(ReceiverFor), background);
