@@ -1,52 +1,31 @@
-using System.Reflection;
 using KHost.Abstractions.Services;
-using KHost.Abstractions.Services.IPC;
 using KHost.Plugins.Chromecast;
 
 namespace KHost.Plugins.Chromecast.Tests;
 
 public class ChromecastProviderSeparationTests
 {
-    [Fact]
-    public void CastService_IsNotAScreen()
-    {
-        var implemented = typeof(ChromecastDisplayProvider).GetInterfaces();
-
-        // If it implements a screen interface again it is back in the role system by accident.
-        Assert.DoesNotContain(typeof(IScreenServer), implemented);
-        Assert.DoesNotContain(typeof(IScreenConnection), implemented);
-        Assert.DoesNotContain(typeof(IScreenProvider), implemented);
-    }
-
-    /// <summary>The interface now carries the whole drawable surface, every member of it with a
-    /// default body. A receiver draws none of it, and the way it says so is by implementing none
-    /// of it — an override here would be a screen feature arriving inside the Cast plugin.</summary>
+    /// <summary>Drawing is now entirely the provider's own business — <see cref="IDisplayProvider"/>
+    /// carries no drawable member at all, so there is nothing left on it to override. The guard is
+    /// the implemented-interface list itself: this provider is <see cref="IDisplayProvider"/>, its
+    /// own button extension, and <see cref="IDisposable"/> for the Cast connection, and nothing
+    /// else. Any interface arriving beyond that set — a screen contract, a drawing surface — is
+    /// what this test exists to catch.</summary>
     [Fact]
     public void CastService_ImplementsNothingDrawable()
     {
-        var drawable = typeof(IDisplayProvider).GetMethods()
-            .Where(m => m.GetParameters().Any(p => typeof(IScreenCommand).IsAssignableFrom(p.ParameterType)))
-            .ToList();
+        var implemented = typeof(ChromecastDisplayProvider).GetInterfaces();
 
-        Assert.NotEmpty(drawable);
+        var expected = new[]
+        {
+            typeof(IDisplayProvider),
+            typeof(IPluginButtonHandler),
+            typeof(IDisposable),
+        };
 
-        var map = typeof(ChromecastDisplayProvider).GetInterfaceMap(typeof(IDisplayProvider));
-
-        var overridden = drawable
-            .Where(method =>
-            {
-                var index = Array.IndexOf(map.InterfaceMethods, method);
-
-                // Declared on the interface itself is the default body; declared on the provider
-                // is an override, which is what this test exists to catch.
-                return index >= 0 && map.TargetMethods[index].DeclaringType == typeof(ChromecastDisplayProvider);
-            })
-            .Select(m => m.Name)
-            .ToList();
-
-        Assert.True(
-            overridden.Count == 0,
-            $"The Cast provider draws things it cannot draw: {string.Join(", ", overridden)}");
+        Assert.Equal(
+            expected.OrderBy(t => t.FullName, StringComparer.Ordinal),
+            implemented.OrderBy(t => t.FullName, StringComparer.Ordinal));
     }
 
     /// <summary>A receiver plays the song and draws nothing over it, and the host reads these to
@@ -68,10 +47,6 @@ public class ChromecastProviderSeparationTests
         // The host waits out the fade it asks for, so claiming one here would buy the room
         // seconds of silence between every song.
         Assert.False(device.SupportsFade);
-        Assert.False(device.SupportsLyrics);
-        Assert.False(device.SupportsMarquee);
-        Assert.False(device.SupportsQrCodes);
-        Assert.False(device.SupportsImage);
     }
 }
 

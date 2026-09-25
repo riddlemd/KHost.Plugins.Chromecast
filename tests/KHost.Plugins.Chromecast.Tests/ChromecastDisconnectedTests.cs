@@ -2,6 +2,7 @@ using KHost.Abstractions.Messaging;
 using System.Net;
 using System.Net.Sockets;
 using KHost.Plugins.Chromecast;
+using KHost.Abstractions.Models;
 using Sharpcaster.Models;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -34,7 +35,7 @@ public class ChromecastDisconnectedTests : IDisposable
     public async Task Transport_IsSilentlyIgnored_WhenNothingIsConnected()
     {
         // A song plays whether or not anyone is casting, so none of these may throw.
-        await _display.LoadAsync("http://192.168.1.10:5251/media/abc/stream.m3u8", TimeSpan.Zero);
+        await _display.LoadAsync(new DisplayLoad { StreamUrl = "http://192.168.1.10:5251/media/abc/stream.m3u8" });
         await _display.PlayAsync();
         await _display.SeekAsync(TimeSpan.FromSeconds(10));
         await _display.PauseAsync();
@@ -104,7 +105,7 @@ public class ChromecastDisconnectedTests : IDisposable
         var reported = 0;
         _display.PlaybackStatusChanged += (_, _) => reported++;
 
-        await _display.LoadAsync("http://192.168.1.10:5251/media/abc/stream.m3u8", TimeSpan.Zero);
+        await _display.LoadAsync(new DisplayLoad { StreamUrl = "http://192.168.1.10:5251/media/abc/stream.m3u8" });
         await _display.PlayAsync();
 
         // The fallback clock must not tick from a receiver that was never there.

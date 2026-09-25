@@ -7,7 +7,7 @@
   "description": "Sends the song to a Chromecast receiver on the local network.",
   "icon": "cast",
   "entryAssembly": "KHost.Plugins.Chromecast.dll",
-  "apiVersion": 4,
+  "apiVersion": 5,
   "settings": [
     {
       "key": "discoverySeconds",

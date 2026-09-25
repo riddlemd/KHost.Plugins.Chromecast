@@ -1,7 +1,9 @@
 using KHost.Abstractions.Interactions;
 using KHost.Abstractions.Interactions.Requests;
+using KHost.Abstractions.Messaging;
 using KHost.Abstractions.Models.Plugins;
 using KHost.Abstractions.Services;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace KHost.Plugins.Chromecast.Tests;
 
@@ -111,6 +113,37 @@ public class ChromecastDeviceTableTests
         var content = await ChromecastDeviceTable.RequestFor(_provider).LoadAsync(CancellationToken.None);
 
         Assert.Equal(["Living Room", "Kitchen"], content.Rows.Select(r => r.Fields[ChromecastDeviceTable.NameKey]));
+    }
+
+    [Fact]
+    public async Task ContentFor_ASweepThatFoundNothing_SaysSoInsteadOfStillLooking()
+    {
+        using var display = new ChromecastDisplayProvider(
+            NullLogger<ChromecastDisplayProvider>.Instance,
+            new ChromecastDisplayProvider.ServiceOptions(),
+            Substitute.For<IMessageBroker>());
+
+        display.SimulateDiscoveryArmed();
+        display.ReportSweep(0);
+
+        var content = await ChromecastDeviceTable.RequestFor(display).LoadAsync(CancellationToken.None);
+
+        Assert.Equal("No receivers found.", content.EmptyMessage);
+    }
+
+    [Fact]
+    public async Task ContentFor_ArmedButNoSweepHasFinishedYet_StillReadsLooking()
+    {
+        using var display = new ChromecastDisplayProvider(
+            NullLogger<ChromecastDisplayProvider>.Instance,
+            new ChromecastDisplayProvider.ServiceOptions(),
+            Substitute.For<IMessageBroker>());
+
+        display.SimulateDiscoveryArmed();
+
+        var content = await ChromecastDeviceTable.RequestFor(display).LoadAsync(CancellationToken.None);
+
+        Assert.Equal("Looking for devices…", content.EmptyMessage);
     }
 
     [Fact]

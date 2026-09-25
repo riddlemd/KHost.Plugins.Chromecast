@@ -72,8 +72,19 @@ internal static class ChromecastDeviceTable
     {
         Rows = [.. provider.Devices.Select(device => RowFor(provider, device))],
         Actions = [SearchAction(provider)],
-        EmptyMessage = provider.IsDiscovering ? "Looking for devices…" : "Not searching for devices.",
+        EmptyMessage = EmptyMessageFor(provider),
     };
+
+    /// <summary>A completed empty sweep reads differently from one still in flight, or a background
+    /// resweep that never tells the dialog anything new looks identical to a hang.</summary>
+    private static string EmptyMessageFor(IDisplayProvider provider)
+    {
+        if (!provider.IsDiscovering) return "Not searching for devices.";
+
+        return provider is ChromecastDisplayProvider { LastSweepFoundNothing: true }
+            ? "No receivers found."
+            : "Looking for devices…";
+    }
 
     /// <summary>What the Plugins-page button says. Null keeps the manifest's own label.</summary>
     internal static string? ButtonLabelFor(IDisplayProvider provider)

@@ -1,6 +1,7 @@
 using System.Net.Sockets;
 using KHost.Plugins.Chromecast;
 using KHost.Abstractions.Messaging;
+using KHost.Abstractions.Models;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace KHost.Plugins.Chromecast.Tests;
@@ -104,7 +105,7 @@ public class ChromecastReceiverIntegrationTests : IAsyncLifetime
     {
         await _display.ConnectAsync(DeviceName);
 
-        await _display.LoadAsync("http://192.168.1.10:5251/media/abc/stream.m3u8", TimeSpan.Zero);
+        await _display.LoadAsync(new DisplayLoad { StreamUrl = "http://192.168.1.10:5251/media/abc/stream.m3u8" });
         await _display.PlayAsync();
         await _display.SeekAsync(TimeSpan.FromSeconds(10));
         await _display.PauseAsync();
@@ -117,7 +118,7 @@ public class ChromecastReceiverIntegrationTests : IAsyncLifetime
     public async Task Transport_IsSilentlyIgnored_WhenNothingIsConnected()
     {
         // A song plays whether or not anyone is casting.
-        await _display.LoadAsync("http://192.168.1.10:5251/media/abc/stream.m3u8", TimeSpan.Zero);
+        await _display.LoadAsync(new DisplayLoad { StreamUrl = "http://192.168.1.10:5251/media/abc/stream.m3u8" });
         await _display.PlayAsync();
         await _display.StopAsync();
 
