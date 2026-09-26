@@ -4,6 +4,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <Version>1.0.1</Version>
     <!-- Sharpcaster and its protobuf stack are plugin-private: the host dropped them with this
          code, so AssemblyDependencyResolver has to find them beside the plugin or every connect
          throws FileNotFoundException. The contracts are trimmed back out by their own targets. -->
