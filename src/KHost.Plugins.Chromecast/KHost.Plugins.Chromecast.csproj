@@ -12,7 +12,9 @@
   </PropertyGroup>
 
   <PropertyGroup>
-    <_KHostOutputDir>$(MSBuildProjectDirectory)\..\..\..\KHost\src\KHost.UserInterface\bin\Debug\net10.0</_KHostOutputDir>
+    <!-- BaseOutputPath, not a literal bin\: WSL builds of the same tree use bin/linux/ and must not overwrite the Windows deploy.
+         The SDK only defaults it to bin\ later, in its targets, so it is still empty here unless set by env. -->
+    <_KHostOutputDir>$(MSBuildProjectDirectory)\..\..\..\KHost\src\KHost.UserInterface\$([MSBuild]::ValueOrDefault('$(BaseOutputPath)', 'bin\'))Debug\net10.0</_KHostOutputDir>
     <_PluginDeployDir>$(_KHostOutputDir)\plugins\khost.chromecast</_PluginDeployDir>
   </PropertyGroup>
 
