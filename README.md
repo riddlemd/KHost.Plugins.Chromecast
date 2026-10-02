@@ -35,9 +35,6 @@ dotnet build KHost.Plugins.Chromecast.slnx
 dotnet test KHost.Plugins.Chromecast.slnx
 ```
 
-The build drops itself into a sibling KHost checkout's `plugins/khost.chromecast` when one exists.
-Restart the host to load it — nothing installs into a running host.
-
 The contracts come from NuGet (`KHost.Abstractions`, `KHost.Common`), not from a checkout beside
 this one. While they are unreleased, pack them from the host repo with `./build/pack-contracts.sh`
 and register the local feed once:

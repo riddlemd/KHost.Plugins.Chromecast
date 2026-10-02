@@ -11,16 +11,6 @@
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
   </PropertyGroup>
 
-  <PropertyGroup>
-    <!-- BaseOutputPath, not a literal bin\: WSL builds of the same tree use bin/linux/ and must not overwrite the Windows deploy.
-         The SDK only defaults it to bin\ later, in its targets, so it is still empty here unless set by env. -->
-    <!-- KHost/main in the repo/branch layout, else the sibling KHost; first found wins. -->
-    <_KHostRepoDir Condition="Exists('$(MSBuildProjectDirectory)\..\..\..\..\KHost\main')">$(MSBuildProjectDirectory)\..\..\..\..\KHost\main</_KHostRepoDir>
-    <_KHostRepoDir Condition="'$(_KHostRepoDir)' == ''">$(MSBuildProjectDirectory)\..\..\..\KHost</_KHostRepoDir>
-    <_KHostOutputDir>$(_KHostRepoDir)\src\KHost.UserInterface\$([MSBuild]::ValueOrDefault('$(BaseOutputPath)', 'bin\'))Debug\net10.0</_KHostOutputDir>
-    <_PluginDeployDir>$(_KHostOutputDir)\plugins\khost.chromecast</_PluginDeployDir>
-  </PropertyGroup>
-
   <ItemGroup>
     <!-- The published contracts, not a sibling checkout: an outside author has no checkout of the
          host beside them, and this repo would otherwise break whenever that one changed branch.
@@ -46,22 +36,5 @@
   <ItemGroup>
     <Content Include="manifest.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
-
-  <!-- Dev convenience: drop the built plugin into a sibling KHost checkout's runtime plugins
-       folder when one exists. Harmless no-op anywhere else. -->
-  <Target Name="DeployToSiblingKHost" AfterTargets="Build" Condition="Exists('$(_KHostOutputDir)')">
-    <ItemGroup>
-      <!-- Globbed inside the target so it sees what is on disk now, not at evaluation. -->
-      <_StalePluginFiles Include="$(_PluginDeployDir)\**\*" />
-      <_PluginFiles Include="$(TargetDir)**\*" />
-    </ItemGroup>
-
-    <!-- Emptied first: a copy only overwrites what it brings, so a dropped reference would
-         otherwise leave its old assembly beside the new ones. -->
-    <Delete Files="@(_StalePluginFiles)" ContinueOnError="true" />
-
-    <Copy SourceFiles="@(_PluginFiles)"
-          DestinationFiles="@(_PluginFiles->'$(_PluginDeployDir)\%(RecursiveDir)%(Filename)%(Extension)')" />
-  </Target>
 
 </Project>
