@@ -1,6 +1,7 @@
 using KHost.Abstractions.Interactions;
 using KHost.Abstractions.Interactions.Requests;
 using KHost.Abstractions.Messaging;
+using KHost.Abstractions.Models;
 using KHost.Abstractions.Models.Plugins;
 using KHost.Abstractions.Services;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -46,6 +47,44 @@ public class ChromecastDeviceTableTests
         await Assert.Single(row.Actions).PerformAsync(CancellationToken.None);
 
         await _provider.Received(1).ConnectAsync("d2", Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task RowFor_ShowHere_WhenTheConnectFails_FlashesOnceNamingTheReceiver()
+    {
+        var flash = Substitute.For<IFlashService>();
+        _provider.ConnectAsync("d2", Arg.Any<CancellationToken>()).Returns(false);
+        var row = ChromecastDeviceTable.RowFor(_provider, Device("d2", "Kitchen"), flash);
+
+        await Assert.Single(row.Actions).PerformAsync(CancellationToken.None);
+
+        flash.Received(1).Show(
+            "Chromecast: could not connect to Kitchen. It did not answer on the network.", FlashType.Warning);
+    }
+
+    [Fact]
+    public async Task RowFor_ShowHere_WhenTheConnectWorks_SaysNothing()
+    {
+        var flash = Substitute.For<IFlashService>();
+        _provider.ConnectAsync("d2", Arg.Any<CancellationToken>()).Returns(true);
+        var row = ChromecastDeviceTable.RowFor(_provider, Device("d2", "Kitchen"), flash);
+
+        await Assert.Single(row.Actions).PerformAsync(CancellationToken.None);
+
+        flash.DidNotReceiveWithAnyArgs().Show(default!, default);
+    }
+
+    [Fact]
+    public async Task ContentFor_PassesTheFlashToEachRow()
+    {
+        var flash = Substitute.For<IFlashService>();
+        _provider.Devices.Returns([Device("d2", "Kitchen")]);
+        _provider.ConnectAsync("d2", Arg.Any<CancellationToken>()).Returns(false);
+
+        var content = await ChromecastDeviceTable.RequestFor(_provider, flash).LoadAsync(CancellationToken.None);
+        await Assert.Single(Assert.Single(content.Rows).Actions).PerformAsync(CancellationToken.None);
+
+        flash.ReceivedWithAnyArgs(1).Show(default!, default);
     }
 
     [Fact]
