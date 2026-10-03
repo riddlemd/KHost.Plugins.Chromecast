@@ -1,4 +1,5 @@
 using KHost.Abstractions.Interactions.Requests;
+using KHost.Abstractions.Models;
 using KHost.Abstractions.Models.Plugins;
 using KHost.Abstractions.Services;
 
@@ -24,7 +25,7 @@ internal static class ChromecastDeviceTable
         new() { Key = StatusKey, Header = "", Kind = PluginTableColumnKind.Label },
     ];
 
-    internal static PluginTableRow RowFor(IDisplayProvider provider, DisplayDevice device) => new()
+    internal static PluginTableRow RowFor(IDisplayProvider provider, DisplayDevice device, IFlashService? flash = null) => new()
     {
         Id = device.Id,
         IsCurrent = device.IsConnected,
@@ -49,7 +50,12 @@ internal static class ChromecastDeviceTable
                     DisplayName = "Show here",
                     Icon = "display",
                     Description = $"Send the song to {device.Name}.",
-                    PerformAsync = token => provider.ConnectAsync(device.Id, token),
+                    PerformAsync = async token =>
+                    {
+                        // The host's display menu flashes this result itself; this caller is ours.
+                        if (!await provider.ConnectAsync(device.Id, token))
+                            flash?.Show($"Chromecast: could not connect to {device.Name}. It did not answer on the network.", FlashType.Warning);
+                    },
                 }],
     };
 
@@ -68,9 +74,9 @@ internal static class ChromecastDeviceTable
 
     /// <summary>Read afresh on every refresh: the search button, the rows and the empty line all
     /// change together when discovery starts or stops.</summary>
-    internal static PluginTableContent ContentFor(IDisplayProvider provider) => new()
+    internal static PluginTableContent ContentFor(IDisplayProvider provider, IFlashService? flash = null) => new()
     {
-        Rows = [.. provider.Devices.Select(device => RowFor(provider, device))],
+        Rows = [.. provider.Devices.Select(device => RowFor(provider, device, flash))],
         Actions = [SearchAction(provider)],
         EmptyMessage = EmptyMessageFor(provider),
     };
@@ -81,9 +87,12 @@ internal static class ChromecastDeviceTable
     {
         if (!provider.IsDiscovering) return "Not searching for devices.";
 
-        return provider is ChromecastDisplayProvider { LastSweepFoundNothing: true }
-            ? "No receivers found."
-            : "Looking for devices…";
+        return provider switch
+        {
+            ChromecastDisplayProvider { LastSweepFailed: true } => "Could not search the network.",
+            ChromecastDisplayProvider { LastSweepFoundNothing: true } => "No receivers found.",
+            _ => "Looking for devices…",
+        };
     }
 
     /// <summary>What the Plugins-page button says. Null keeps the manifest's own label.</summary>
@@ -92,10 +101,10 @@ internal static class ChromecastDeviceTable
             ? $"Showing on {connected.Name}"
             : null;
 
-    internal static ShowPluginTableRequest RequestFor(IDisplayProvider provider) => new()
+    internal static ShowPluginTableRequest RequestFor(IDisplayProvider provider, IFlashService? flash = null) => new()
     {
         Title = $"{provider.Name} devices",
         Columns = Columns,
-        LoadAsync = _ => Task.FromResult(ContentFor(provider)),
+        LoadAsync = _ => Task.FromResult(ContentFor(provider, flash)),
     };
 }

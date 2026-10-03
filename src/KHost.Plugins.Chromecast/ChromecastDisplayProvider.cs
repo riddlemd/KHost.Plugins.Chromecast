@@ -18,6 +18,7 @@ using KHost.Common.Media;
 using PlaybackProgram = KHost.Abstractions.Models.PlaybackProgram;
 using RenderTarget = KHost.Abstractions.Models.RenderTarget;
 using DisplayLoad = KHost.Abstractions.Models.DisplayLoad;
+using FlashType = KHost.Abstractions.Models.FlashType;
 
 namespace KHost.Plugins.Chromecast;
 
@@ -66,8 +67,19 @@ public sealed class ChromecastDisplayProvider : IDisplayProvider, IPluginButtonH
     /// <summary>Set once a completed sweep found nothing, so the table can say so instead of
     /// reading "still looking" for a background poll that already answered.</summary>
     private volatile bool _lastSweepFoundNothing;
+
+    /// <summary>Set while the latest sweep threw, so the table can say the search itself broke.</summary>
+    private volatile bool _lastSweepFailed;
+
+    /// <summary>Why the latest sweep failed; a background loop repeats it every 30s, and only a
+    /// different reason is worth another Warning or flash.</summary>
+    private string? _sweepFailureReason;
     private readonly IMessageBroker _broker;
     private readonly IInteractionDispatcher? _dispatcher;
+    private readonly IFlashService? _flash;
+    private readonly Func<ChromecastClient, ChromecastReceiver, Task> _open;
+    private readonly Action<ChromecastLocator, TimeSpan> _startContinuous;
+    private readonly Func<ChromecastClient, Task> _relaunch;
 
     // IPlaybackService depends on every display provider, so it is resolved on use, never injected.
     private readonly IServiceProvider? _services;
@@ -112,8 +124,9 @@ public sealed class ChromecastDisplayProvider : IDisplayProvider, IPluginButtonH
         IPluginContext context,
         IMessageBroker broker,
         IInteractionDispatcher dispatcher,
-        IServiceProvider services)
-        : this(logger, OptionsFrom(context.BindSettings<ChromecastSettings>()), broker, dispatcher, services)
+        IServiceProvider services,
+        IFlashService flash)
+        : this(logger, OptionsFrom(context.BindSettings<ChromecastSettings>()), broker, dispatcher, services, flash: flash)
     {
     }
 
@@ -128,12 +141,20 @@ public sealed class ChromecastDisplayProvider : IDisplayProvider, IPluginButtonH
         Func<string?>? lanAddress = null,
         Func<Task>? stopMedia = null,
         Func<ChromecastLocator, TimeSpan, Task<IEnumerable<ChromecastReceiver>>>? zeroconfSweep = null,
-        Func<string, TimeSpan, CancellationToken, Task<IReadOnlyList<BonjourBrowser.Service>>>? bonjourBrowse = null)
+        Func<string, TimeSpan, CancellationToken, Task<IReadOnlyList<BonjourBrowser.Service>>>? bonjourBrowse = null,
+        IFlashService? flash = null,
+        Func<ChromecastClient, ChromecastReceiver, Task>? open = null,
+        Action<ChromecastLocator, TimeSpan>? startContinuous = null,
+        Func<ChromecastClient, Task>? relaunch = null)
     {
         _logger = logger;
         _options = options;
         _broker = broker;
         _dispatcher = dispatcher;
+        _flash = flash;
+        _open = open ?? OpenAsync;
+        _relaunch = relaunch ?? (client => client.LaunchApplicationAsync(_options.ReceiverAppId, false));
+        _startContinuous = startContinuous ?? ((locator, interval) => locator.StartContinuousDiscovery(interval));
         _services = services;
         _castMedia = castMedia ?? CastOnClientAsync;
         _lanAddress = lanAddress ?? LanAddress;
@@ -152,7 +173,7 @@ public sealed class ChromecastDisplayProvider : IDisplayProvider, IPluginButtonH
 
     public Task InvokeButtonAsync(string key, CancellationToken cancellationToken = default)
         => key == DevicesButtonKey && _dispatcher is { } dispatcher
-            ? dispatcher.RequestAsync(ChromecastDeviceTable.RequestFor(this), cancellationToken)
+            ? dispatcher.RequestAsync(ChromecastDeviceTable.RequestFor(this, _flash), cancellationToken)
             : Task.CompletedTask;
 
     /// <summary>Says what the room is watching without the host opening anything.</summary>
@@ -215,6 +236,9 @@ public sealed class ChromecastDisplayProvider : IDisplayProvider, IPluginButtonH
     /// looking" from "already looked and there is nothing" for as long as discovery stays armed.</summary>
     internal bool LastSweepFoundNothing => _lastSweepFoundNothing;
 
+    /// <summary>Whether the most recent sweep threw rather than came back empty.</summary>
+    internal bool LastSweepFailed => _lastSweepFailed;
+
     /// <summary>Arms <see cref="IsDiscovering"/> without reaching the real daemon; the tests' stand-in
     /// for a sweep already under way.</summary>
     internal void SimulateDiscoveryArmed() => _bonjour ??= new CancellationTokenSource();
@@ -239,6 +263,8 @@ public sealed class ChromecastDisplayProvider : IDisplayProvider, IPluginButtonH
     /// would otherwise steer every call through the other one.</summary>
     internal async Task StartZeroconfDiscoveryAsync()
     {
+        ResetSweepFailure();
+
         var locator = new ChromecastLocator();
         locator.ChromecastReceiverFound += OnReceiverFound;
         _locator = locator;
@@ -258,11 +284,50 @@ public sealed class ChromecastDisplayProvider : IDisplayProvider, IPluginButtonH
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Cast discovery sweep failed");
+            ReportSweepFailure(ex);
         }
 
-        locator.StartContinuousDiscovery(TimeSpan.FromSeconds(30));
+        try
+        {
+            _startContinuous(locator, TimeSpan.FromSeconds(30));
+        }
+        catch (Exception ex)
+        {
+            // Left armed, discovery would read as running with nothing listening.
+            locator.ChromecastReceiverFound -= OnReceiverFound;
+            if (ReferenceEquals(_locator, locator)) _locator = null;
+            ReportSweepFailure(ex);
+        }
+
         RaiseStateChanged();
+    }
+
+    private void ResetSweepFailure()
+    {
+        _lastSweepFailed = false;
+        _sweepFailureReason = null;
+    }
+
+    /// <summary>Records a sweep that threw, and says so once per distinct reason.</summary>
+    /// <remarks>The background loop retries every 30s, so a standing failure would otherwise warn
+    /// and flash all night.</remarks>
+    private void ReportSweepFailure(Exception ex)
+    {
+        _lastSweepFailed = true;
+
+        var fresh = Interlocked.Exchange(ref _sweepFailureReason, ex.Message) != ex.Message;
+        _logger.Log(fresh ? LogLevel.Warning : LogLevel.Debug, ex, "Cast discovery sweep failed");
+
+        if (fresh) Tell("Chromecast: could not search the network.");
+
+        RaiseStateChanged();
+    }
+
+    /// <summary>One plain line to the host; the show carries on whether or not it lands.</summary>
+    private void Tell(string text)
+    {
+        try { _flash?.Show(text, FlashType.Warning); }
+        catch (Exception ex) { _logger.LogDebug(ex, "Could not flash: {Text}", text); }
     }
 
     /// <summary>Says what a sweep actually found, because silence reads the same as every failure.</summary>
@@ -273,6 +338,7 @@ public sealed class ChromecastDisplayProvider : IDisplayProvider, IPluginButtonH
     internal void ReportSweep(int count, bool background = false)
     {
         _lastSweepFoundNothing = count == 0;
+        ResetSweepFailure();
 
         if (count > 0) _logger.LogInformation("Cast sweep found {Count} receiver(s)", count);
         else _logger.Log(background ? LogLevel.Debug : LogLevel.Information, "Cast sweep found no receivers");
@@ -285,6 +351,8 @@ public sealed class ChromecastDisplayProvider : IDisplayProvider, IPluginButtonH
     /// test machine's own <see cref="BonjourBrowser.IsSupported"/>.</summary>
     internal async Task StartBonjourDiscoveryAsync()
     {
+        ResetSweepFailure();
+
         var cancellation = new CancellationTokenSource();
         _bonjour = cancellation;
 
@@ -303,12 +371,15 @@ public sealed class ChromecastDisplayProvider : IDisplayProvider, IPluginButtonH
                     await BonjourSweepAsync(cancellation.Token, background: true);
                 }
                 catch (OperationCanceledException) { return; }
-                catch (Exception ex) { _logger.LogWarning(ex, "Cast discovery sweep failed"); }
+                catch (Exception ex) { ReportSweepFailure(ex); }
             }
         }, CancellationToken.None);
 
         RaiseStateChanged();
     }
+
+    /// <summary>One background-style pass, callable by a test without waiting out the 30s loop.</summary>
+    internal Task SweepBonjourAsync(bool background) => BonjourSweepAsync(CancellationToken.None, background);
 
     private async Task BonjourSweepAsync(CancellationToken cancellationToken, bool background = false)
     {
@@ -322,7 +393,7 @@ public sealed class ChromecastDisplayProvider : IDisplayProvider, IPluginButtonH
         catch (OperationCanceledException) { throw; }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Cast discovery sweep failed");
+            ReportSweepFailure(ex);
         }
     }
 
@@ -352,6 +423,7 @@ public sealed class ChromecastDisplayProvider : IDisplayProvider, IPluginButtonH
         var bonjour = _bonjour;
         _bonjour = null;
         _lastSweepFoundNothing = false;
+        ResetSweepFailure();
 
         if (bonjour is not null)
         {
@@ -405,17 +477,26 @@ public sealed class ChromecastDisplayProvider : IDisplayProvider, IPluginButtonH
 
         try
         {
-            var opening = OpenAsync(client, receiver);
+            var opening = _open(client, receiver);
 
             // Sharpcaster's connect takes no token, so the wait is bounded here instead; the attempt
             // runs to completion abandoned, not cancelled. The client below is torn down, never reused.
             if (await Task.WhenAny(opening, Task.Delay(_options.ConnectTimeout, cancellationToken)) != opening)
+            {
+                // Nothing awaits it again, so a later fault would go unobserved.
+                _ = opening.ContinueWith(
+                    task => _logger.LogDebug(task.Exception!.GetBaseException(), "Abandoned connect to {Name} failed", name),
+                    TaskContinuationOptions.OnlyOnFaulted);
+
                 throw new TimeoutException($"{name} did not answer within {_options.ConnectTimeout.TotalSeconds:0} seconds");
+            }
 
             await opening;
         }
         catch (Exception ex)
         {
+            // Not flashed here: the host's display menu flashes a false result itself, and the
+            // device table's own action does too, so a flash here would be a second line.
             _logger.LogError("Could not connect to Cast device {Name}: {Reason}", name, ex.Message);
             // Deliberately not the caller's token: this is the cleanup for a connection that
             // already failed, and cancelling it would leave the client undisposed.
@@ -647,7 +728,7 @@ public sealed class ChromecastDisplayProvider : IDisplayProvider, IPluginButtonH
             : Task.CompletedTask;
 
     /// <summary>A television switched off mid-song must not fail the performance.</summary>
-    private async Task GuardAsync(Func<Task> action)
+    internal async Task GuardAsync(Func<Task> action)
     {
         var client = _client;
 
@@ -726,7 +807,7 @@ public sealed class ChromecastDisplayProvider : IDisplayProvider, IPluginButtonH
 
             _logger.LogWarning("Cast device {Name} stopped answering", deviceId);
 
-            OnDeviceDropped(deviceId);
+            OnDeviceDropped(deviceId, willRetry: true);
             await PickBackUpAsync(deviceId);
             return;
         }
@@ -764,7 +845,7 @@ public sealed class ChromecastDisplayProvider : IDisplayProvider, IPluginButtonH
 
         try
         {
-            await client.LaunchApplicationAsync(_options.ReceiverAppId, false);
+            await _relaunch(client);
 
             // A new session, so whatever was playing has to be put back on it. Announcing the
             // change is how the caller learns it has a receiver that knows nothing.
@@ -772,6 +853,9 @@ public sealed class ChromecastDisplayProvider : IDisplayProvider, IPluginButtonH
 
             _logger.LogInformation("Relaunched the receiver app on {Name}", deviceId);
             RaiseStateChanged();
+
+            // Dropping now would throw away the session just made, and tell the room it was lost.
+            return;
         }
         catch (Exception ex)
         {
@@ -781,7 +865,7 @@ public sealed class ChromecastDisplayProvider : IDisplayProvider, IPluginButtonH
 
         // A broken pipe rather than a refused command: the receiver restarted, and the socket it
         // dropped cannot be launched on at all. It answers a fresh connection instead.
-        OnDeviceDropped(deviceId);
+        OnDeviceDropped(deviceId, willRetry: true);
         await PickBackUpAsync(deviceId);
     }
 
@@ -792,12 +876,17 @@ public sealed class ChromecastDisplayProvider : IDisplayProvider, IPluginButtonH
         try
         {
             if (await ConnectAsync(deviceId))
+            {
                 _logger.LogInformation("Picked Cast device {Name} back up", deviceId);
+                return;
+            }
         }
         catch (Exception ex)
         {
             _logger.LogWarning("Cast device {Name} did not come back: {Reason}", deviceId, ex.Message);
         }
+
+        Tell($"Chromecast: {deviceId} did not come back.");
     }
 
     /// <summary>Resolves the host's base address to localhost, which on a television means itself.</summary>
@@ -837,12 +926,16 @@ public sealed class ChromecastDisplayProvider : IDisplayProvider, IPluginButtonH
     /// after the replacement is already playing. Without this that farewell drops the live
     /// connection, and with nothing left to play on the song stops.
     /// </param>
-    private void OnDeviceDropped(string deviceId, ChromecastClient? source = null)
+    /// <param name="willRetry">Whether a pick-up follows, so the line promises only what happens.</param>
+    internal void OnDeviceDropped(string deviceId, ChromecastClient? source = null, bool willRetry = false)
     {
         if (_connectedDeviceId != deviceId) return;
         if (source is not null && !ReferenceEquals(source, _client)) return;
 
         _logger.LogWarning("Cast device {Name} dropped its connection", deviceId);
+        Tell(willRetry
+            ? $"Chromecast: lost {deviceId}; trying to reconnect."
+            : $"Chromecast: lost {deviceId}.");
 
         var client = _client;
 
