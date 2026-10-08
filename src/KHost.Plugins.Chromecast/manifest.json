@@ -2,12 +2,12 @@
   "$schema": "https://raw.githubusercontent.com/riddlemd/KHost/main/src/KHost.Abstractions/Models/Plugins/manifest.schema.json",
   "id": "c7a41e92-3d58-4b06-8f13-6ad9c25e7b40",
   "name": "Chromecast",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "author": "KHost",
   "description": "Sends the song to a Chromecast receiver on the local network.",
   "icon": "cast",
   "entryAssembly": "KHost.Plugins.Chromecast.dll",
-  "apiVersion": 7,
+  "apiVersion": 8,
   "settings": [
     {
       "key": "discoverySeconds",
