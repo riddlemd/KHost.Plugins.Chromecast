@@ -4,7 +4,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <Version>1.0.3</Version>
+    <Version>1.0.4</Version>
     <!-- Sharpcaster and its protobuf stack are plugin-private: the host dropped them with this
          code, so AssemblyDependencyResolver has to find them beside the plugin or every connect
          throws FileNotFoundException. The contracts are trimmed back out by their own targets. -->
@@ -17,8 +17,8 @@
          Both are MIT, so nothing PolyForm reaches what this plugin redistributes. The packages'
          own targets keep them out of this project's output, so the host's copies stay the loaded
          ones without ExcludeAssets here - which would also strip them from the test project. -->
-    <PackageReference Include="KHost.Abstractions" Version="0.49.0" />
-    <PackageReference Include="KHost.Common" Version="0.49.0" />
+    <PackageReference Include="KHost.Abstractions" Version="0.51.0" />
+    <PackageReference Include="KHost.Common" Version="0.51.0" />
 
     <!-- The host has these loaded already, so a shipped copy is never the one used. -->
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.7" />
