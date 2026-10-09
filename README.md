@@ -8,10 +8,18 @@ so the host holds no handle on the device and asks this plugin for everything.
 
 ## Why it is a plugin
 
-It used to be `src/KHost.Cast` in the host. Casting is not supported at the level the rest of the
-app is, and mDNS browsing plus a CASTV2 protobuf transport (Sharpcaster, Zeroconf, Google.Protobuf,
-System.Reactive) is a dependency chain the host should not carry just to play a local file. Moving
-it out took all of that with it.
+mDNS browsing plus a CASTV2 protobuf transport (Sharpcaster, Zeroconf, Google.Protobuf,
+System.Reactive) is a dependency chain the host should not carry just to play a local file, so
+casting lives here.
+
+## Installing
+
+From a host, open Plugins, then Available, install Chromecast and restart KHost. The release is one
+portable zip that runs on any platform. By hand, unzip a release into its own folder under KHost's
+`plugins/`, enable it on the Plugins page and restart.
+
+Settings: how long discovery sweeps the network (default 5 s) and how long a receiver has to answer
+a connect (default 10 s).
 
 ## The device list
 
@@ -35,9 +43,9 @@ dotnet build KHost.Plugins.Chromecast.slnx
 dotnet test KHost.Plugins.Chromecast.slnx
 ```
 
-The contracts come from NuGet (`KHost.Abstractions`, `KHost.Common`), not from a checkout beside
-this one. While they are unreleased, pack them from the host repo with `./build/pack-contracts.sh`
-and register the local feed once:
+The contracts (`KHost.Abstractions`, `KHost.Common`, 0.53.0) are package references, not a checkout
+beside this one. They are not on nuget.org yet: pack them from the KHost repo with
+`./build/pack-contracts.sh` and register the local feed once:
 
 ```bash
 dotnet nuget add source ~/.nuget/khost-local -n khost-local
