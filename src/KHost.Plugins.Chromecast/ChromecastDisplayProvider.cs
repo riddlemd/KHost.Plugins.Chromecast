@@ -11,6 +11,7 @@ using KHost.Abstractions.Messaging;
 using KHost.Common.Discovery;
 using KHost.Abstractions.Messaging.Messages;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Sharpcaster;
 using Sharpcaster.Models;
 using Sharpcaster.Models.Media;
@@ -53,7 +54,9 @@ public sealed class ChromecastDisplayProvider : IDisplayProvider, IPluginButtonH
         public TimeSpan ConnectTimeout { get; set; } = TimeSpan.FromSeconds(10);
     }
 
-    private readonly ServiceOptions _options;
+    // Read per use: a settings save reaches the next sweep or connect without a restart.
+    private readonly Func<ServiceOptions> _optionsSource;
+    private ServiceOptions _options => _optionsSource();
     private readonly ILogger<ChromecastDisplayProvider> _logger;
     private readonly SemaphoreSlim _lock = new(1, 1);
     /// <summary>The Bonjour registration type; the wire name carries no trailing domain.</summary>
@@ -121,12 +124,13 @@ public sealed class ChromecastDisplayProvider : IDisplayProvider, IPluginButtonH
 
     public ChromecastDisplayProvider(
         ILogger<ChromecastDisplayProvider> logger,
-        IPluginContext context,
+        IOptionsMonitor<ChromecastSettings> settings,
         IMessageBroker broker,
         IInteractionDispatcher dispatcher,
         IServiceProvider services,
         IFlashService flash)
-        : this(logger, OptionsFrom(context.BindSettings<ChromecastSettings>()), broker, dispatcher, services, flash: flash)
+        : this(logger, new ServiceOptions(), broker, dispatcher, services, flash: flash,
+            optionsSource: OptionsSourceFor(settings))
     {
     }
 
@@ -145,10 +149,11 @@ public sealed class ChromecastDisplayProvider : IDisplayProvider, IPluginButtonH
         IFlashService? flash = null,
         Func<ChromecastClient, ChromecastReceiver, Task>? open = null,
         Action<ChromecastLocator, TimeSpan>? startContinuous = null,
-        Func<ChromecastClient, Task>? relaunch = null)
+        Func<ChromecastClient, Task>? relaunch = null,
+        Func<ServiceOptions>? optionsSource = null)
     {
         _logger = logger;
-        _options = options;
+        _optionsSource = optionsSource ?? (() => options);
         _broker = broker;
         _dispatcher = dispatcher;
         _flash = flash;
@@ -181,6 +186,10 @@ public sealed class ChromecastDisplayProvider : IDisplayProvider, IPluginButtonH
         => key == DevicesButtonKey
             ? new PluginButtonState { Label = ChromecastDeviceTable.ButtonLabelFor(this) }
             : PluginButtonState.Default;
+
+    /// <summary>Reads CurrentValue on every call, so the tests exercise the same live read the plugin uses.</summary>
+    internal static Func<ServiceOptions> OptionsSourceFor(IOptionsMonitor<ChromecastSettings> settings)
+        => () => OptionsFrom(settings.CurrentValue);
 
     private static ServiceOptions OptionsFrom(ChromecastSettings settings) => new()
     {

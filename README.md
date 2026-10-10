@@ -19,7 +19,7 @@ portable zip that runs on any platform. By hand, unzip a release into its own fo
 `plugins/`, enable it on the Plugins page and restart.
 
 Settings: how long discovery sweeps the network (default 5 s) and how long a receiver has to answer
-a connect (default 10 s).
+a connect (default 10 s). A save takes effect on the next sweep or connect, with no restart: the host serves the settings as options.
 
 ## The device list
 
@@ -43,7 +43,7 @@ dotnet build KHost.Plugins.Chromecast.slnx
 dotnet test KHost.Plugins.Chromecast.slnx
 ```
 
-The contracts (`KHost.Abstractions`, `KHost.Common`, 0.53.0) are package references, not a checkout
+The contracts (`KHost.Abstractions`, `KHost.Common`, 0.58.0) are package references, not a checkout
 beside this one. They are not on nuget.org yet: pack them from the KHost repo with
 `./build/pack-contracts.sh` and register the local feed once:
 
