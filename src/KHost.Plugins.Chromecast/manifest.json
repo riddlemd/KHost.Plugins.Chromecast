@@ -13,14 +13,16 @@
       "key": "discoverySeconds",
       "type": "int",
       "section": "Discovery",
-      "label": "How long to sweep the network for receivers (seconds)",
+      "label": "Discovery time (seconds)",
+      "description": "How long to sweep the network for receivers.",
       "default": 5
     },
     {
       "key": "connectTimeoutSeconds",
       "type": "int",
       "section": "Discovery",
-      "label": "How long a receiver has to answer before giving up (seconds)",
+      "label": "Connect timeout (seconds)",
+      "description": "How long a receiver has to answer before giving up.",
       "default": 10
     }
   ],
