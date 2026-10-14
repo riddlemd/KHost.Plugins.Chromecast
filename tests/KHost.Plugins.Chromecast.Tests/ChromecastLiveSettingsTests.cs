@@ -107,7 +107,7 @@ public class ChromecastLiveSettingsTests
     {
         using var doc = JsonDocument.Parse(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "manifest.json")));
 
-        Assert.Equal(6, doc.RootElement.GetProperty("apiVersion").GetInt32());
+        Assert.Equal(KHost.Abstractions.Models.Plugins.PluginApi.CurrentVersion, doc.RootElement.GetProperty("apiVersion").GetInt32());
         Assert.False(doc.RootElement.TryGetProperty("settingsApplyLive", out _));
     }
 
