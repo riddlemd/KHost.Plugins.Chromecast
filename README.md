@@ -1,3 +1,9 @@
+<div align="center">
+
+![KHost.Plugins.Chromecast: your song on the big set](docs/assets/social-preview.png)
+
+</div>
+
 # KHost.Plugins.Chromecast
 
 Sends the song to a Chromecast receiver on the local network.
