@@ -58,11 +58,6 @@ A save takes effect on the next sweep or connect, with no restart: the host serv
 
 ## How it works
 
-### Why it is a plugin
-
-mDNS browsing plus a CASTV2 protobuf transport (Sharpcaster, Zeroconf, Google.Protobuf, System.Reactive) is a
-dependency chain the host should not carry just to play a local file, so casting lives here.
-
 ### The device list
 
 The device list is reached from the Plugins page, not from the console's Screens dialog. A plugin cannot ship markup,
